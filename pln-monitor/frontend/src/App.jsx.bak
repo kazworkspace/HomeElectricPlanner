@@ -1,0 +1,805 @@
+import { useState, useEffect, useCallback, useMemo } from "react";
+
+const TARIFF_RATES = {
+  "R-1/450VA": { name: "R-1 / 450 VA (Subsidi)", rate: 415, va: 450, mcb: 2 },
+  "R-1/900VA": { name: "R-1 / 900 VA (Subsidi)", rate: 605, va: 900, mcb: 4 },
+  "R-1/900VA-RTM": { name: "R-1 / 900 VA (Non-Subsidi)", rate: 1352, va: 900, mcb: 4 },
+  "R-1/1300VA": { name: "R-1 / 1300 VA", rate: 1444.70, va: 1300, mcb: 6 },
+  "R-1/2200VA": { name: "R-1 / 2200 VA", rate: 1444.70, va: 2200, mcb: 10 },
+  "R-2/3500VA": { name: "R-2 / 3500 VA", rate: 1699.53, va: 3500, mcb: 16 },
+  "R-2/4400VA": { name: "R-2 / 4400 VA", rate: 1699.53, va: 4400, mcb: 20 },
+  "R-2/5500VA": { name: "R-2 / 5500 VA", rate: 1699.53, va: 5500, mcb: 25 },
+  "R-3/6600VA+": { name: "R-3 / 6600 VA ke atas", rate: 1699.53, va: 6600, mcb: 32 },
+};
+
+const VOLTAGE = 220;
+
+const CATEGORY_COLORS = {
+  cooling: "#0EA5E9", kitchen: "#F59E0B", laundry: "#8B5CF6",
+  entertainment: "#EC4899", electronics: "#06B6D4", lighting: "#FCD34D",
+  bathroom: "#14B8A6", utility: "#6B7280", custom: "#F97316",
+};
+const CATEGORY_LABELS = {
+  cooling: "Pendingin", kitchen: "Dapur", laundry: "Laundry",
+  entertainment: "Hiburan", electronics: "Elektronik", lighting: "Pencahayaan",
+  bathroom: "Kamar Mandi", utility: "Utilitas", custom: "Lainnya",
+};
+const CATEGORY_ICONS = {
+  cooling: "❄️", kitchen: "🍳", laundry: "👕", entertainment: "📺",
+  electronics: "💻", lighting: "💡", bathroom: "🚿", utility: "🔧", custom: "🔌",
+};
+
+function formatRupiah(n) { return "Rp " + Math.round(n).toLocaleString("id-ID"); }
+function formatKwh(k) { return k < 0.01 ? (k * 1000).toFixed(1) + " Wh" : k.toFixed(2) + " kWh"; }
+
+/* ─── Persistent Storage via REST API ─── */
+
+async function apiGet(key) {
+  try {
+    const res = await fetch(`/api/storage/${encodeURIComponent(key)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function apiSet(key, value) {
+  try {
+    await fetch(`/api/storage/${encodeURIComponent(key)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+  } catch (e) {
+    console.error("Storage write error:", e);
+  }
+}
+
+async function apiDelete(key) {
+  try {
+    await fetch(`/api/storage/${encodeURIComponent(key)}`, { method: "DELETE" });
+  } catch (e) {
+    console.error("Storage delete error:", e);
+  }
+}
+
+// Drop-in replacement for the old window.storage-based hook
+function useStorage(key, def) {
+  const [value, setValue] = useState(def);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const raw = await apiGet(key);
+      if (!cancelled && raw !== null) {
+        try { setValue(JSON.parse(raw)); } catch {}
+      }
+      if (!cancelled) setLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [key]);
+
+  const persist = useCallback(
+    async (nv) => {
+      setValue((prev) => {
+        const v = typeof nv === "function" ? nv(prev) : nv;
+        apiSet(key, JSON.stringify(v));
+        return v;
+      });
+    },
+    [key]
+  );
+
+  return [value, persist, loaded];
+}
+
+/* ─── UI Primitives ─── */
+
+function TabButton({ active, onClick, children, badge }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: "10px 16px", border: "none",
+      borderBottom: active ? "2px solid #16A34A" : "2px solid transparent",
+      background: "transparent", color: active ? "#16A34A" : "#94A3B8",
+      fontFamily: "'DM Sans',sans-serif", fontWeight: active ? 700 : 500,
+      fontSize: 13, cursor: "pointer", transition: "all .2s",
+      display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+    }}>
+      {children}
+      {badge > 0 && <span style={{ background: "#16A34A", color: "#fff", borderRadius: 99, fontSize: 11, fontWeight: 700, padding: "1px 7px" }}>{badge}</span>}
+    </button>
+  );
+}
+
+function Card({ children, style, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{ background: "#1E293B", borderRadius: 14, padding: 20, border: "1px solid #334155", cursor: onClick ? "pointer" : "default", transition: "all .2s", ...style }}
+      onMouseEnter={e => { if (onClick) e.currentTarget.style.borderColor = "#16A34A"; }}
+      onMouseLeave={e => { if (onClick) e.currentTarget.style.borderColor = "#334155"; }}
+    >{children}</div>
+  );
+}
+
+function StatCard({ label, value, sub, color, icon }) {
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600, marginBottom: 4, textTransform: "uppercase", letterSpacing: .5 }}>{label}</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: color || "#F1F5F9", fontFamily: "'Space Mono',monospace" }}>{value}</div>
+          {sub && <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>{sub}</div>}
+        </div>
+        {icon && <span style={{ fontSize: 26, opacity: .7 }}>{icon}</span>}
+      </div>
+    </Card>
+  );
+}
+
+function MiniBar({ value, max, color }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  return (
+    <div style={{ height: 6, background: "#1E293B", borderRadius: 3, flex: 1 }}>
+      <div style={{ height: "100%", width: pct + "%", background: color || "#16A34A", borderRadius: 3, transition: "width .4s ease" }} />
+    </div>
+  );
+}
+
+function Modal({ open, onClose, title, children }) {
+  if (!open) return null;
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(4px)" }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: "#1E293B", borderRadius: 16, padding: 28, maxWidth: 520, width: "100%", border: "1px solid #334155", maxHeight: "85vh", overflowY: "auto" }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h3 style={{ margin: 0, fontFamily: "'Space Mono',monospace", fontSize: 16, color: "#F1F5F9" }}>{title}</h3>
+          <button onClick={onClose} style={{ background: "#334155", border: "none", color: "#94A3B8", width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function InputField({ label, value, onChange, type = "text", suffix, placeholder, min, step }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: .5 }}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type={type} value={value} onChange={e => onChange(e.target.value)}
+          placeholder={placeholder} min={min} step={step}
+          style={{ width: "100%", padding: "10px 14px", background: "#0F172A", border: "1px solid #334155", borderRadius: 10, color: "#F1F5F9", fontFamily: "'DM Sans',sans-serif", fontSize: 14, outline: "none" }}
+          onFocus={e => e.target.style.borderColor = "#16A34A"}
+          onBlur={e => e.target.style.borderColor = "#334155"}
+        />
+        {suffix && <span style={{ fontSize: 13, color: "#64748B", whiteSpace: "nowrap", fontWeight: 600 }}>{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
+function SelectField({ label, value, onChange, options }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: .5 }}>{label}</label>
+      <select
+        value={value} onChange={e => onChange(e.target.value)}
+        style={{ width: "100%", padding: "10px 14px", background: "#0F172A", border: "1px solid #334155", borderRadius: 10, color: "#F1F5F9", fontFamily: "'DM Sans',sans-serif", fontSize: 14, outline: "none", cursor: "pointer" }}
+      >
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function Btn({ children, onClick, variant = "primary", style: s, disabled }) {
+  const base = { padding: "10px 20px", border: "none", borderRadius: 10, fontFamily: "'DM Sans',sans-serif", fontWeight: 700, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer", transition: "all .2s", opacity: disabled ? .5 : 1 };
+  const v = { primary: { background: "#16A34A", color: "#fff" }, secondary: { background: "#334155", color: "#CBD5E1" }, danger: { background: "#DC2626", color: "#fff" }, ghost: { background: "transparent", color: "#94A3B8", padding: "6px 12px" } };
+  return <button onClick={disabled ? undefined : onClick} style={{ ...base, ...v[variant], ...s }}>{children}</button>;
+}
+
+const catOpts = Object.entries(CATEGORY_LABELS).map(([v, l]) => ({ value: v, label: `${CATEGORY_ICONS[v]} ${l}` }));
+
+/* ─── Dashboard Charts ─── */
+
+function CategoryBreakdown({ devices, rate }) {
+  const cats = {};
+  devices.forEach(d => {
+    const c = d.category || "custom";
+    if (!cats[c]) cats[c] = 0;
+    cats[c] += (d.watt * d.hoursPerDay * 30 * (d.qty || 1)) / 1000 * rate;
+  });
+  const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+  const mx = sorted[0]?.[1] || 1;
+  if (!sorted.length) return <div style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: 20 }}>Belum ada perangkat</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {sorted.map(([c, cost]) => (
+        <div key={c} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 90, fontSize: 12, color: "#94A3B8", fontWeight: 600, textAlign: "right" }}>{CATEGORY_LABELS[c]}</div>
+          <MiniBar value={cost} max={mx} color={CATEGORY_COLORS[c]} />
+          <div style={{ width: 105, fontSize: 12, color: "#CBD5E1", fontFamily: "'Space Mono',monospace", textAlign: "right" }}>{formatRupiah(cost)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TopConsumers({ devices, rate }) {
+  const sorted = [...devices].sort((a, b) => (b.watt * b.hoursPerDay * (b.qty || 1)) - (a.watt * a.hoursPerDay * (a.qty || 1))).slice(0, 5);
+  const mx = sorted[0] ? sorted[0].watt * sorted[0].hoursPerDay * (sorted[0].qty || 1) * 30 / 1000 : 1;
+  if (!sorted.length) return <div style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: 20 }}>Belum ada perangkat</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {sorted.map((d, i) => {
+        const kwh = d.watt * d.hoursPerDay * (d.qty || 1) * 30 / 1000;
+        const c = d.category || "custom";
+        return (
+          <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 11, color: "#475569", width: 18, textAlign: "center", fontWeight: 800 }}>#{i + 1}</span>
+            <span style={{ fontSize: 18 }}>{CATEGORY_ICONS[c]}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, color: "#E2E8F0", fontWeight: 600 }}>{d.name}</div>
+              <MiniBar value={kwh} max={mx} color={CATEGORY_COLORS[c]} />
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 12, color: "#CBD5E1", fontFamily: "'Space Mono',monospace" }}>{formatKwh(kwh)}</div>
+              <div style={{ fontSize: 11, color: "#16A34A" }}>{formatRupiah(kwh * rate)}/bln</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ─── Simulation ─── */
+
+function SimulationTab({ selectedTariff, simDevices, setSimDevices }) {
+  const [sn, setSn] = useState("");
+  const [sw, setSw] = useState("");
+  const [sq, setSq] = useState("1");
+
+  const tariff = TARIFF_RATES[selectedTariff];
+  const maxVA = tariff?.va || 1300;
+  const mcbAmp = tariff?.mcb || 6;
+  const maxWatt = maxVA;
+
+  const totalW = simDevices.reduce((s, d) => d.on ? s + d.watt * (d.qty || 1) : s, 0);
+  const totalAmp = totalW / VOLTAGE;
+  const pct = mcbAmp > 0 ? (totalAmp / mcbAmp) * 100 : 0;
+  const over = totalAmp > mcbAmp;
+  const warn = pct > 75 && !over;
+  const statusColor = over ? "#EF4444" : warn ? "#F59E0B" : "#16A34A";
+
+  function addSim() {
+    if (!sn || !sw) return;
+    setSimDevices(p => [...p, { id: Date.now() + Math.random(), name: sn, watt: parseFloat(sw), qty: parseInt(sq) || 1, on: true }]);
+    setSn(""); setSw(""); setSq("1");
+  }
+
+  const suggestedUpgrade = Object.values(TARIFF_RATES).find(t => t.mcb > totalAmp);
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 16, border: `1px solid ${statusColor}44` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: .5, marginBottom: 2 }}>Kapasitas MCB</div>
+            <div style={{ fontSize: 13, color: "#CBD5E1" }}>{tariff?.name} — MCB <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>{mcbAmp}A</span> <span style={{ fontSize: 11, color: "#64748B" }}>({maxVA} VA · {VOLTAGE}V)</span></div>
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'Space Mono',monospace", color: statusColor }}>{Math.min(pct, 199).toFixed(0)}%</div>
+        </div>
+        <div style={{ position: "relative", marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontSize: 10, color: "#64748B" }}>0A</span>
+            <span style={{ fontSize: 10, color: statusColor, fontWeight: 700 }}>{totalAmp.toFixed(1)}A / {mcbAmp}A</span>
+          </div>
+          <div style={{ height: 28, background: "#0F172A", borderRadius: 14, overflow: "hidden", position: "relative" }}>
+            <div style={{
+              height: "100%", width: Math.min(pct, 100) + "%",
+              background: over ? "repeating-linear-gradient(45deg,#EF4444,#EF4444 10px,#DC2626 10px,#DC2626 20px)" : warn ? "linear-gradient(90deg,#16A34A,#F59E0B)" : "linear-gradient(90deg,#16A34A,#22C55E)",
+              borderRadius: 14, transition: "width .5s ease",
+            }} />
+            <div style={{ position: "absolute", left: "80%", top: 0, bottom: 0, width: 2, background: "#F59E0B88" }} />
+          </div>
+        </div>
+        <div style={{ background: over ? "#7F1D1D" : warn ? "#78350F" : "#14532D", borderRadius: 10, padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <span style={{ fontWeight: 700, fontSize: 14, color: statusColor }}>
+            {over ? "⚠️ OVERCAPACITY — MCB TRIP!" : warn ? "⚡ Mendekati Batas" : "✅ Aman"}
+          </span>
+          <span style={{ fontFamily: "'Space Mono',monospace", fontSize: 14, color: "#F1F5F9", fontWeight: 700 }}>
+            {totalAmp.toFixed(1)}A <span style={{ color: "#64748B", fontWeight: 400 }}>/ {mcbAmp}A</span>
+          </span>
+        </div>
+      </Card>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12, marginBottom: 16 }}>
+        <Card style={{ background: "#0F172A" }}>
+          <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 }}>Total Beban (ON)</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#F59E0B", fontFamily: "'Space Mono',monospace" }}>{totalW.toLocaleString("id-ID")}W</div>
+          <div style={{ fontSize: 12, color: "#06B6D4", fontFamily: "'Space Mono',monospace" }}>{totalAmp.toFixed(1)} Ampere</div>
+        </Card>
+        <Card style={{ background: "#0F172A" }}>
+          <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 }}>Sisa Kapasitas</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: over ? "#EF4444" : "#16A34A", fontFamily: "'Space Mono',monospace" }}>
+            {over ? "-" : ""}{Math.abs(mcbAmp - totalAmp).toFixed(1)}A
+          </div>
+          <div style={{ fontSize: 12, color: "#64748B" }}>{over ? "Kelebihan!" : "Tersedia"} ({Math.abs(maxWatt - totalW).toFixed(0)}W)</div>
+        </Card>
+        <Card style={{ background: "#0F172A" }}>
+          <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: .5, marginBottom: 4 }}>Perangkat</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#06B6D4", fontFamily: "'Space Mono',monospace" }}>{simDevices.filter(d => d.on).length}<span style={{ fontSize: 14, color: "#475569" }}>/{simDevices.length}</span></div>
+          <div style={{ fontSize: 12, color: "#64748B" }}>aktif / total</div>
+        </Card>
+      </div>
+
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#94A3B8", marginBottom: 14, textTransform: "uppercase", letterSpacing: .5 }}>Tambah Perangkat Simulasi</div>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr .7fr auto", gap: 10, alignItems: "end" }}>
+          <InputField label="Nama" value={sn} onChange={setSn} placeholder="Contoh: Kompor Induksi" />
+          <InputField label="Watt" value={sw} onChange={setSw} type="number" suffix="W" />
+          <InputField label="Unit" value={sq} onChange={setSq} type="number" min="1" />
+          <div style={{ marginBottom: 14 }}><Btn onClick={addSim} disabled={!sn || !sw}>+ Tambah</Btn></div>
+        </div>
+        {simDevices.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            {simDevices.map(d => {
+              const dAmp = (d.watt * (d.qty || 1)) / VOLTAGE;
+              return (
+                <div key={d.id} style={{
+                  display: "flex", alignItems: "center", gap: 12, padding: "10px 14px",
+                  background: d.on ? "#16A34A11" : "#0F172A", borderRadius: 10,
+                  border: `1px solid ${d.on ? "#16A34A33" : "#1E293B"}`, transition: "all .2s",
+                }}>
+                  <button
+                    onClick={() => setSimDevices(p => p.map(x => x.id === d.id ? { ...x, on: !x.on } : x))}
+                    style={{ width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", background: d.on ? "#16A34A" : "#334155", position: "relative", transition: "background .2s", flexShrink: 0 }}
+                  >
+                    <div style={{ width: 18, height: 18, borderRadius: 9, background: "#fff", position: "absolute", top: 3, left: d.on ? 23 : 3, transition: "left .2s" }} />
+                  </button>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: d.on ? "#E2E8F0" : "#64748B" }}>{d.name}</span>
+                    {(d.qty || 1) > 1 && <span style={{ fontSize: 11, color: "#64748B", marginLeft: 6 }}>×{d.qty}</span>}
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: 13, fontFamily: "'Space Mono',monospace", color: d.on ? "#F59E0B" : "#475569" }}>
+                      {(d.watt * (d.qty || 1)).toLocaleString("id-ID")}W
+                    </span>
+                    <div style={{ fontSize: 10, color: d.on ? "#06B6D4" : "#475569", fontFamily: "'Space Mono',monospace" }}>{dAmp.toFixed(1)}A</div>
+                  </div>
+                  <button onClick={() => setSimDevices(p => p.filter(x => x.id !== d.id))} style={{ background: "transparent", border: "none", color: "#475569", cursor: "pointer", fontSize: 14 }}>🗑</button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", padding: "20px 0", color: "#475569", fontSize: 13 }}>Tambahkan perangkat untuk simulasi beban listrik</div>
+        )}
+      </Card>
+
+      <Card style={{ background: over ? "#7F1D1D22" : "#0F172A", border: `1px solid ${over ? "#EF444444" : "#334155"}` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: over ? "#FCA5A5" : "#94A3B8", marginBottom: 10, textTransform: "uppercase", letterSpacing: .5 }}>
+          {over ? "🔴 Rekomendasi" : "💡 Info"}
+        </div>
+        {over ? (
+          <div style={{ fontSize: 13, color: "#FCA5A5", lineHeight: 1.7 }}>
+            Total arus <strong>{totalAmp.toFixed(1)}A</strong> melebihi kapasitas MCB <strong>{mcbAmp}A</strong> ({totalW.toLocaleString("id-ID")}W / {maxVA} VA).
+            MCB akan <strong>trip/turun</strong> jika semua perangkat dinyalakan bersamaan.
+            <div style={{ marginTop: 12, padding: "12px 16px", background: "#7F1D1D44", borderRadius: 10, border: "1px solid #EF444433" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Solusi:</div>
+              • Matikan beberapa perangkat sebelum menyalakan yang berdaya besar<br />
+              • Hindari menyalakan AC, setrika, dan kompor induksi secara bersamaan<br />
+              • Toggle OFF beberapa perangkat di atas untuk melihat kombinasi yang aman<br />
+              {suggestedUpgrade && <>• Pertimbangkan upgrade daya ke <strong>{suggestedUpgrade.name} (MCB {suggestedUpgrade.mcb}A)</strong></>}
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: "#94A3B8", lineHeight: 1.7 }}>
+            Simulasi ini menghitung arus listrik (Ampere) berdasarkan total Watt ÷ {VOLTAGE}V.
+            MCB akan trip jika arus melebihi <strong>{mcbAmp}A</strong>.<br /><br />
+            Contoh: Kompor Induksi 1300W ≈ {(1300 / VOLTAGE).toFixed(1)}A (pengukuran aktual ~5.5-5.6A).<br />
+            Tambahkan perangkat dan toggle ON/OFF untuk menguji berbagai kombinasi.
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ─── Usage Analysis ─── */
+
+function UsageAnalysis({ logs, rate, onDelete }) {
+  if (!logs.length) return <div style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: 30 }}>Belum ada data aktivitas. Tambahkan aktivitas untuk mulai analisis.</div>;
+
+  const activities = logs.map(log => {
+    const kwhPerUse = (log.watt * log.durationMin) / 60000;
+    const costPerUse = kwhPerUse * rate;
+    return { ...log, kwhPerUse, costPerUse };
+  });
+
+  const byExpensive = [...activities].sort((a, b) => b.costPerUse - a.costPerUse);
+  const byCheapest = [...activities].sort((a, b) => a.costPerUse - b.costPerUse);
+  const maxCost = byExpensive[0]?.costPerUse || 1;
+
+  const catTotals = {};
+  activities.forEach(a => {
+    const c = a.category || "custom";
+    if (!catTotals[c]) catTotals[c] = { count: 0, totalCost: 0, totalKwh: 0 };
+    catTotals[c].count += a.count;
+    catTotals[c].totalCost += a.costPerUse * a.count;
+    catTotals[c].totalKwh += a.kwhPerUse * a.count;
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#94A3B8", marginBottom: 14, textTransform: "uppercase", letterSpacing: .5 }}>⚡ Ranking Biaya per Aktivitas</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {byExpensive.map((a, i) => {
+            const c = a.category || "custom";
+            return (
+              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 11, color: i === 0 ? "#EF4444" : i < 3 ? "#F59E0B" : "#475569", width: 22, textAlign: "center", fontWeight: 800 }}>#{i + 1}</span>
+                <span style={{ fontSize: 16 }}>{CATEGORY_ICONS[c]}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#E2E8F0" }}>{a.name}</span>
+                    <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 99, background: CATEGORY_COLORS[c] + "22", color: CATEGORY_COLORS[c], fontWeight: 700 }}>{CATEGORY_LABELS[c]}</span>
+                  </div>
+                  <MiniBar value={a.costPerUse} max={maxCost} color={i === 0 ? "#EF4444" : i < 3 ? "#F59E0B" : CATEGORY_COLORS[c]} />
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: i === 0 ? "#EF4444" : "#FCD34D", fontFamily: "'Space Mono',monospace" }}>{formatRupiah(a.costPerUse)}</div>
+                  <div style={{ fontSize: 10, color: "#64748B" }}>{a.watt}W · {a.durationMin}mnt · {formatKwh(a.kwhPerUse)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {byCheapest.length >= 2 && (
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#16A34A", marginBottom: 10, textTransform: "uppercase", letterSpacing: .5 }}>🏆 Paling Hemat</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "#14532D33", borderRadius: 10, border: "1px solid #16A34A33" }}>
+            <span style={{ fontSize: 28 }}>{CATEGORY_ICONS[byCheapest[0].category || "custom"]}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#22C55E" }}>{byCheapest[0].name}</div>
+              <div style={{ fontSize: 12, color: "#64748B" }}>{byCheapest[0].watt}W · {byCheapest[0].durationMin} menit</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#16A34A", fontFamily: "'Space Mono',monospace" }}>{formatRupiah(byCheapest[0].costPerUse)}</div>
+              <div style={{ fontSize: 11, color: "#64748B" }}>per penggunaan</div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {Object.keys(catTotals).length > 1 && (
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#94A3B8", marginBottom: 14, textTransform: "uppercase", letterSpacing: .5 }}>📊 Ringkasan per Kategori</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Object.entries(catTotals).sort((a, b) => b[1].totalCost - a[1].totalCost).map(([c, data]) => (
+              <div key={c} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "#0F172A", borderRadius: 8 }}>
+                <span style={{ fontSize: 18 }}>{CATEGORY_ICONS[c]}</span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: CATEGORY_COLORS[c] }}>{CATEGORY_LABELS[c]}</span>
+                  <span style={{ fontSize: 11, color: "#64748B", marginLeft: 8 }}>{data.count} kali pakai</span>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#FCD34D", fontFamily: "'Space Mono',monospace" }}>{formatRupiah(data.totalCost)}</div>
+                  <div style={{ fontSize: 10, color: "#64748B" }}>{formatKwh(data.totalKwh)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#94A3B8", marginBottom: 12, textTransform: "uppercase", letterSpacing: .5 }}>📋 Semua Aktivitas</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[...logs].sort((a, b) => b.timestamp - a.timestamp).map(log => {
+            const kwh = (log.watt * log.durationMin) / 60000;
+            const cost = kwh * rate;
+            const c = log.category || "custom";
+            return (
+              <div key={log.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "#0F172A", borderRadius: 10, border: "1px solid #1E293B" }}>
+                <span style={{ fontSize: 22 }}>{CATEGORY_ICONS[c]}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#E2E8F0" }}>{log.name}</span>
+                    <span style={{ fontSize: 11, color: "#64748B" }}>× {log.count}</span>
+                    <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 99, background: CATEGORY_COLORS[c] + "22", color: CATEGORY_COLORS[c], fontWeight: 700 }}>{CATEGORY_LABELS[c]}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                    {log.watt}W · {log.durationMin} mnt/kali · {formatKwh(kwh)}/kali
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: "#FCD34D" }}>{formatRupiah(cost)}<span style={{ color: "#64748B", fontSize: 10 }}>/kali</span></div>
+                  <div style={{ fontSize: 11, color: "#64748B" }}>Total: {formatRupiah(cost * log.count)}</div>
+                </div>
+                <button onClick={() => onDelete(log.id)} style={{ background: "transparent", border: "none", color: "#475569", cursor: "pointer", fontSize: 14, padding: 4 }}>🗑</button>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════ MAIN ═══════════ */
+
+export default function ElectricityMonitor() {
+  const [devices, setDevices, d1] = useStorage("elmon:devices", []);
+  const [usageLogs, setUsageLogs, d2] = useStorage("elmon:usage-logs", []);
+  const [selectedTariff, setSelectedTariff, d3] = useStorage("elmon:tariff", "R-1/1300VA");
+  const [simDevices, setSimDevices, d4] = useStorage("elmon:sim-devices", []);
+
+  const [tab, setTab] = useState("dashboard");
+  const [addDeviceOpen, setAddDeviceOpen] = useState(false);
+  const [editDevice, setEditDevice] = useState(null);
+  const [addUsageOpen, setAddUsageOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const [fn, setFn] = useState(""); const [fw, setFw] = useState(""); const [fh, setFh] = useState("");
+  const [fq, setFq] = useState("1"); const [fc, setFc] = useState("custom");
+  const [un, setUn] = useState(""); const [uw, setUw] = useState(""); const [ud, setUd] = useState("");
+  const [uc, setUc] = useState("1"); const [ucat, setUcat] = useState("custom");
+
+  const loaded = d1 && d2 && d3 && d4;
+  const rate = TARIFF_RATES[selectedTariff]?.rate || 1444.70;
+
+  const totalKwh = useMemo(() => devices.reduce((s, d) => s + (d.watt * d.hoursPerDay * 30 * (d.qty || 1)) / 1000, 0), [devices]);
+  const totalCost = totalKwh * rate;
+  const logsCost = useMemo(() => usageLogs.reduce((s, l) => s + ((l.watt * l.durationMin * l.count) / 60000) * rate, 0), [usageLogs, rate]);
+
+  function resetDF() { setFn(""); setFw(""); setFh(""); setFq("1"); setFc("custom"); }
+
+  function saveDevice() {
+    if (!fn || !fw || !fh) return;
+    if (editDevice) {
+      setDevices(p => p.map(d => d.id === editDevice.id ? { ...d, name: fn, watt: parseFloat(fw), hoursPerDay: parseFloat(fh), qty: parseInt(fq) || 1, category: fc } : d));
+      setEditDevice(null);
+    } else {
+      setDevices(p => [...p, { id: Date.now() + Math.random(), name: fn, watt: parseFloat(fw), hoursPerDay: parseFloat(fh), qty: parseInt(fq) || 1, category: fc }]);
+    }
+    resetDF(); setAddDeviceOpen(false);
+  }
+
+  function openEdit(d) {
+    setFn(d.name); setFw(String(d.watt)); setFh(String(d.hoursPerDay)); setFq(String(d.qty || 1)); setFc(d.category || "custom");
+    setEditDevice(d); setAddDeviceOpen(true);
+  }
+
+  function saveUsage() {
+    if (!un || !uw || !ud) return;
+    setUsageLogs(p => [...p, { id: Date.now() + Math.random(), name: un, watt: parseFloat(uw), durationMin: parseFloat(ud), count: parseInt(uc) || 1, category: ucat, timestamp: Date.now() }]);
+    setUn(""); setUw(""); setUd(""); setUc("1"); setUcat("custom");
+    setAddUsageOpen(false);
+  }
+
+  async function clearAll() {
+    if (!confirm("Hapus semua data?")) return;
+    await apiDelete("elmon:devices");
+    await apiDelete("elmon:usage-logs");
+    await apiDelete("elmon:tariff");
+    await apiDelete("elmon:sim-devices");
+    setDevices([]);
+    setUsageLogs([]);
+    setSimDevices([]);
+    setSelectedTariff("R-1/1300VA");
+  }
+
+  if (!loaded) return (
+    <div style={{ minHeight: "100vh", background: "#0F172A", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans',sans-serif" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>⚡</div>
+        <div style={{ color: "#16A34A", fontWeight: 700 }}>Memuat data...</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0F172A", fontFamily: "'DM Sans',sans-serif", color: "#E2E8F0" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg,#0F172A,#1a2744)", borderBottom: "1px solid #1E293B", padding: "16px 20px", position: "sticky", top: 0, zIndex: 100 }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 24 }}>⚡</span>
+            <div>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, fontSize: 16, color: "#16A34A" }}>PLN Monitor</div>
+              <div style={{ fontSize: 11, color: "#475569" }}>{TARIFF_RATES[selectedTariff]?.name}</div>
+            </div>
+          </div>
+          <Btn variant="ghost" onClick={() => setSettingsOpen(true)}>⚙️</Btn>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ borderBottom: "1px solid #1E293B", background: "#0F172A", position: "sticky", top: 63, zIndex: 99 }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", display: "flex", overflowX: "auto", padding: "0 16px" }}>
+          <TabButton active={tab === "dashboard"} onClick={() => setTab("dashboard")}>📊 Dashboard</TabButton>
+          <TabButton active={tab === "devices"} onClick={() => setTab("devices")} badge={devices.length}>🔌 Perangkat</TabButton>
+          <TabButton active={tab === "usage"} onClick={() => setTab("usage")} badge={usageLogs.length}>📝 Analisis</TabButton>
+          <TabButton active={tab === "simulation"} onClick={() => setTab("simulation")}>🧪 Simulasi</TabButton>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: 20 }}>
+
+        {/* DASHBOARD */}
+        {tab === "dashboard" && (
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 14, marginBottom: 20 }}>
+              <StatCard label="Estimasi Bulanan" value={formatRupiah(totalCost)} sub={`${totalKwh.toFixed(1)} kWh`} color="#16A34A" icon="💰" />
+              <StatCard label="Estimasi Harian" value={formatRupiah(totalCost / 30)} sub={`${(totalKwh / 30).toFixed(1)} kWh`} color="#0EA5E9" icon="📅" />
+              <StatCard label="Tarif/kWh" value={formatRupiah(rate)} sub={TARIFF_RATES[selectedTariff]?.name} color="#FCD34D" icon="⚡" />
+              <StatCard label="Total Aktivitas" value={formatRupiah(logsCost)} sub={`${usageLogs.length} aktivitas`} color="#F59E0B" icon="📝" />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 14 }}>
+              <Card>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#94A3B8", marginBottom: 14, textTransform: "uppercase", letterSpacing: .5 }}>Biaya per Kategori</div>
+                <CategoryBreakdown devices={devices} rate={rate} />
+              </Card>
+              <Card>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#94A3B8", marginBottom: 14, textTransform: "uppercase", letterSpacing: .5 }}>Top 5 Pemakan Listrik</div>
+                <TopConsumers devices={devices} rate={rate} />
+              </Card>
+            </div>
+            {!devices.length && (
+              <div style={{ textAlign: "center", padding: "40px 20px", color: "#475569" }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>🏠</div>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Belum ada perangkat</div>
+                <div style={{ fontSize: 13, marginBottom: 16 }}>Mulai tambahkan perangkat elektronik rumah Anda</div>
+                <Btn onClick={() => setTab("devices")}>+ Tambah Perangkat</Btn>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* DEVICES */}
+        {tab === "devices" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: "#64748B" }}>{devices.length} perangkat terdaftar</div>
+              <Btn onClick={() => { resetDF(); setEditDevice(null); setAddDeviceOpen(true); }}>+ Tambah Perangkat</Btn>
+            </div>
+            {!devices.length ? (
+              <Card style={{ textAlign: "center", padding: 40 }}>
+                <div style={{ fontSize: 40, marginBottom: 10 }}>🔌</div>
+                <div style={{ color: "#64748B", fontSize: 14 }}>Belum ada perangkat. Klik tombol di atas untuk menambahkan.</div>
+              </Card>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {devices.map(d => {
+                  const kwh = (d.watt * d.hoursPerDay * 30 * (d.qty || 1)) / 1000;
+                  const c = d.category || "custom";
+                  return (
+                    <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", background: "#1E293B", borderRadius: 12, border: "1px solid #334155" }}>
+                      <span style={{ fontSize: 26 }}>{CATEGORY_ICONS[c]}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: "#F1F5F9" }}>{d.name}</span>
+                          {(d.qty || 1) > 1 && <span style={{ fontSize: 11, background: "#334155", padding: "2px 8px", borderRadius: 99, color: "#94A3B8" }}>×{d.qty}</span>}
+                          <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: CATEGORY_COLORS[c] + "22", color: CATEGORY_COLORS[c], fontWeight: 700 }}>{CATEGORY_LABELS[c]}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{d.watt}W · {d.hoursPerDay} jam/hari</div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#16A34A", fontFamily: "'Space Mono',monospace" }}>{formatRupiah(kwh * rate)}</div>
+                        <div style={{ fontSize: 11, color: "#64748B" }}>{formatKwh(kwh)}/bln</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                        <button onClick={() => openEdit(d)} style={{ background: "#334155", border: "none", color: "#94A3B8", width: 30, height: 30, borderRadius: 8, cursor: "pointer", fontSize: 12 }}>✏️</button>
+                        <button onClick={() => setDevices(p => p.filter(x => x.id !== d.id))} style={{ background: "#334155", border: "none", color: "#94A3B8", width: 30, height: 30, borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🗑</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* USAGE */}
+        {tab === "usage" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: "#64748B" }}>Analisis efisiensi biaya listrik per aktivitas</div>
+              <Btn onClick={() => setAddUsageOpen(true)}>+ Tambah Aktivitas</Btn>
+            </div>
+            <UsageAnalysis logs={usageLogs} rate={rate} onDelete={id => setUsageLogs(p => p.filter(l => l.id !== id))} />
+          </div>
+        )}
+
+        {/* SIMULATION */}
+        {tab === "simulation" && <SimulationTab selectedTariff={selectedTariff} simDevices={simDevices} setSimDevices={setSimDevices} />}
+      </div>
+
+      {/* ═══ MODALS ═══ */}
+
+      <Modal open={addDeviceOpen} onClose={() => { setAddDeviceOpen(false); setEditDevice(null); resetDF(); }} title={editDevice ? "Edit Perangkat" : "Tambah Perangkat"}>
+        <InputField label="Nama Perangkat" value={fn} onChange={setFn} placeholder="Contoh: AC Kamar Tidur" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <InputField label="Daya (Watt)" value={fw} onChange={setFw} type="number" suffix="W" min="0" />
+          <InputField label="Jam per Hari" value={fh} onChange={setFh} type="number" suffix="jam" min="0" step="0.25" />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <InputField label="Jumlah Unit" value={fq} onChange={setFq} type="number" min="1" />
+          <SelectField label="Kategori" value={fc} onChange={setFc} options={catOpts} />
+        </div>
+        {fw && fh && (
+          <div style={{ background: "#0F172A", borderRadius: 10, padding: 14, marginBottom: 14, border: "1px solid #334155" }}>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 6 }}>Estimasi Biaya</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#16A34A", fontFamily: "'Space Mono',monospace" }}>
+              {formatRupiah((parseFloat(fw) * parseFloat(fh) * 30 * (parseInt(fq) || 1)) / 1000 * rate)}
+              <span style={{ fontSize: 12, color: "#64748B", fontWeight: 400 }}> /bulan</span>
+            </div>
+            <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>{formatKwh((parseFloat(fw) * parseFloat(fh) * 30 * (parseInt(fq) || 1)) / 1000)} per bulan</div>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Btn variant="secondary" onClick={() => { setAddDeviceOpen(false); setEditDevice(null); resetDF(); }}>Batal</Btn>
+          <Btn onClick={saveDevice} disabled={!fn || !fw || !fh}>{editDevice ? "💾 Simpan" : "+ Tambah"}</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={addUsageOpen} onClose={() => setAddUsageOpen(false)} title="Tambah Aktivitas">
+        <InputField label="Nama Aktivitas" value={un} onChange={setUn} placeholder="Contoh: Rebus Air, Setrika 5 Baju, Masak Nasi" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <InputField label="Daya (Watt)" value={uw} onChange={setUw} type="number" suffix="W" min="0" />
+          <InputField label="Durasi per Kali" value={ud} onChange={setUd} type="number" suffix="menit" min="0" />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <InputField label="Berapa Kali" value={uc} onChange={setUc} type="number" suffix="kali" min="1" />
+          <SelectField label="Kategori" value={ucat} onChange={setUcat} options={catOpts} />
+        </div>
+        {uw && ud && (
+          <div style={{ background: "#0F172A", borderRadius: 10, padding: 14, marginBottom: 14, border: "1px solid #334155" }}>
+            <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 6 }}>Estimasi Biaya</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#FCD34D", fontFamily: "'Space Mono',monospace" }}>
+              {formatRupiah(((parseFloat(uw) * parseFloat(ud)) / 60000) * rate * (parseInt(uc) || 1))}
+            </div>
+            <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>{formatKwh(((parseFloat(uw) * parseFloat(ud)) / 60000) * (parseInt(uc) || 1))} total</div>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Btn variant="secondary" onClick={() => setAddUsageOpen(false)}>Batal</Btn>
+          <Btn onClick={saveUsage} disabled={!un || !uw || !ud}>+ Tambah</Btn>
+        </div>
+      </Modal>
+
+      <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Pengaturan">
+        <SelectField
+          label="Golongan Tarif PLN" value={selectedTariff} onChange={v => setSelectedTariff(v)}
+          options={Object.entries(TARIFF_RATES).map(([k, v]) => ({ value: k, label: `${v.name} — ${formatRupiah(v.rate)}/kWh` }))}
+        />
+        <div style={{ background: "#0F172A", borderRadius: 10, padding: 14, marginBottom: 20, border: "1px solid #334155" }}>
+          <div style={{ fontSize: 12, color: "#94A3B8", marginBottom: 4 }}>Tarif saat ini</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#FCD34D", fontFamily: "'Space Mono',monospace" }}>{formatRupiah(rate)}<span style={{ fontSize: 12, color: "#64748B" }}> /kWh</span></div>
+          <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>Kapasitas: {TARIFF_RATES[selectedTariff]?.va} VA · MCB {TARIFF_RATES[selectedTariff]?.mcb}A · {VOLTAGE}V</div>
+        </div>
+        <div style={{ borderTop: "1px solid #334155", paddingTop: 16, marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#DC2626", textTransform: "uppercase", letterSpacing: .5, marginBottom: 10 }}>Zona Bahaya</div>
+          <Btn variant="danger" onClick={clearAll} style={{ width: "100%" }}>🗑 Hapus Semua Data</Btn>
+        </div>
+      </Modal>
+    </div>
+  );
+}
