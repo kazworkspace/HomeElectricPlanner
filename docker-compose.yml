@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    container_name: pln-backend
+    ports:
+      - "0.0.0.0:3001:3001"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DB_DIR=/app/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: pln-frontend
+    ports:
+      - "0.0.0.0:5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    environment:
+      - VITE_API_TARGET=http://backend:3001
+    depends_on:
+      - backend
+    restart: unless-stopped

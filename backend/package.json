@@ -1,0 +1,13 @@
+{
+  "name": "pln-monitor-backend",
+  "version": "2.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "express": "^4.21.0"
+  }
+}
