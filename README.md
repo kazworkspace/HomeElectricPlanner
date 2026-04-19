@@ -1,4 +1,4 @@
-# ⚡ PLN Monitor v2.0 [VIBE CODE]
+# ⚡ PLN Monitor v2.0
 
 Monitor konsumsi listrik rumah tangga Indonesia — estimasi biaya PLN, simulasi beban MCB, dan tips hemat listrik.
 

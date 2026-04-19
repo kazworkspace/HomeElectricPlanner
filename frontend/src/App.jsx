@@ -130,14 +130,21 @@ const DEFAULT_STATE = {
 };
 
 async function loadState() {
-  try {
-    const res = await fetch(`/api/storage/${STORAGE_KEY}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.value ? JSON.parse(data.value) : null;
-  } catch {
-    return null;
+  const delays = [500, 1000, 2000, 3000];
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      const res = await fetch(`/api/storage/${STORAGE_KEY}`);
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return data?.value ? JSON.parse(data.value) : null;
+    } catch {
+      if (attempt < delays.length) {
+        await new Promise((r) => setTimeout(r, delays[attempt]));
+      }
+    }
   }
+  return null;
 }
 
 async function saveState(state) {
@@ -157,6 +164,7 @@ function useAppState() {
   const [loaded, setLoaded] = useState(false);
   const saveTimer = useRef(null);
   const stateRef = useRef(state);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,6 +175,7 @@ function useAppState() {
         setState(merged);
         stateRef.current = merged;
       }
+      loadedRef.current = true;
       setLoaded(true);
     });
     return () => { cancelled = true; };
@@ -176,7 +185,7 @@ function useAppState() {
     setState((prev) => {
       const next = typeof patch === "function" ? patch(prev) : { ...prev, ...patch };
       stateRef.current = next;
-      // Debounced save — 500ms after last change
+      if (!loadedRef.current) return next;
       clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => saveState(next), 500);
       return next;
@@ -186,6 +195,7 @@ function useAppState() {
   // Save on unmount
   useEffect(() => {
     return () => {
+      if (!loadedRef.current) return;
       clearTimeout(saveTimer.current);
       saveState(stateRef.current);
     };
