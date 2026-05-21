@@ -5,6 +5,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 
 const app = express();
+app.disable("x-powered-by");
 
 /* ─── Security Headers ─── */
 app.use((_req, res, next) => {
@@ -49,6 +50,56 @@ setInterval(() => {
 
 app.use(rateLimit);
 
+/* ─── Auth Rate Limiter (brute-force protection) ─── */
+const authRateMap = new Map();
+const AUTH_WINDOW = 15 * 60_000; // 15 minutes
+const AUTH_LIMIT = 10;
+
+function authRateLimit(req, res, next) {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  let entry = authRateMap.get(ip);
+  if (!entry || now - entry.start > AUTH_WINDOW) {
+    entry = { start: now, count: 0 };
+    authRateMap.set(ip, entry);
+  }
+  entry.count++;
+  if (entry.count > AUTH_LIMIT) {
+    const retryAfter = Math.ceil((AUTH_WINDOW - (now - entry.start)) / 1000);
+    res.setHeader("Retry-After", retryAfter);
+    return res.status(429).json({ error: "Too many attempts. Try again later." });
+  }
+  next();
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - AUTH_WINDOW * 2;
+  for (const [ip, entry] of authRateMap) {
+    if (entry.start < cutoff) authRateMap.delete(ip);
+  }
+}, AUTH_WINDOW);
+
+/* ─── Auth ─── */
+const API_KEY = process.env.API_KEY;
+if (!API_KEY) {
+  console.warn("[AUTH] API_KEY not set — all storage endpoints will return 401");
+}
+
+function requireAuth(req, res, next) {
+  const key = req.headers["x-api-key"];
+  if (!API_KEY || !key) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const a = Buffer.from(key);
+    const b = Buffer.from(API_KEY);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+  } catch {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
 /* ─── Database Setup ─── */
 const dataDir = process.env.DB_DIR || path.join(__dirname, "data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -85,7 +136,8 @@ if (process.env.NODE_ENV !== "production") {
   app.use((_req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key");
+    if (_req.method === "OPTIONS") return res.sendStatus(204);
     next();
   });
 }
@@ -104,8 +156,11 @@ function validateKey(key) {
 
 /* ─── Storage API ─── */
 
+// Auth verify
+app.get("/api/auth/verify", authRateLimit, requireAuth, (_req, res) => res.json({ ok: true }));
+
 // GET single key
-app.get("/api/storage/:key", (req, res) => {
+app.get("/api/storage/:key", requireAuth, (req, res) => {
   const { key } = req.params;
   if (!validateKey(key)) return res.status(400).json({ error: "Invalid key" });
   const row = stmtGet.get(key);
@@ -114,7 +169,7 @@ app.get("/api/storage/:key", (req, res) => {
 });
 
 // POST (upsert) single key
-app.post("/api/storage/:key", (req, res) => {
+app.post("/api/storage/:key", requireAuth, (req, res) => {
   const { key } = req.params;
   if (!validateKey(key)) return res.status(400).json({ error: "Invalid key" });
   const { value } = req.body;
@@ -129,7 +184,7 @@ app.post("/api/storage/:key", (req, res) => {
 });
 
 // DELETE single key
-app.delete("/api/storage/:key", (req, res) => {
+app.delete("/api/storage/:key", requireAuth, (req, res) => {
   const { key } = req.params;
   if (!validateKey(key)) return res.status(400).json({ error: "Invalid key" });
   stmtDelete.run(key);
@@ -137,7 +192,7 @@ app.delete("/api/storage/:key", (req, res) => {
 });
 
 // GET list keys by prefix
-app.get("/api/storage", (req, res) => {
+app.get("/api/storage", requireAuth, (req, res) => {
   const prefix = String(req.query.prefix || "");
   if (prefix && !validateKey(prefix))
     return res.status(400).json({ error: "Invalid prefix" });
@@ -161,7 +216,7 @@ const batchSet = db.transaction((entries) => {
   }
 });
 
-app.post("/api/batch-get", (req, res) => {
+app.post("/api/batch-get", requireAuth, (req, res) => {
   const { keys } = req.body;
   if (!Array.isArray(keys) || keys.length > 20)
     return res.status(400).json({ error: "keys must be array (max 20)" });
@@ -171,7 +226,7 @@ app.post("/api/batch-get", (req, res) => {
   res.json(result);
 });
 
-app.post("/api/batch-set", (req, res) => {
+app.post("/api/batch-set", requireAuth, (req, res) => {
   const { entries } = req.body;
   if (typeof entries !== "object" || entries === null)
     return res.status(400).json({ error: "entries must be an object" });

@@ -119,6 +119,7 @@ function useIsMobile() {
 /* ═══════════ STORAGE — SINGLE MERGED KEY ═══════════ */
 
 const STORAGE_KEY = "elmon:state";
+const SESSION_KEY = "elmon:apikey";
 const DEFAULT_STATE = {
   devices: [],
   usageLogs: [],
@@ -129,12 +130,15 @@ const DEFAULT_STATE = {
   voltage: DEFAULT_VOLTAGE,
 };
 
-async function loadState() {
+async function loadState(apiKey) {
+  if (!apiKey) return null;
   const delays = [500, 1000, 2000, 3000];
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
-      const res = await fetch(`/api/storage/${STORAGE_KEY}`);
-      if (res.status === 404) return null;
+      const res = await fetch(`/api/storage/${STORAGE_KEY}`, {
+        headers: { "X-API-Key": apiKey },
+      });
+      if (res.status === 404 || res.status === 401) return null;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       return data?.value ? JSON.parse(data.value) : null;
@@ -147,61 +151,82 @@ async function loadState() {
   return null;
 }
 
-async function saveState(state) {
-  try {
-    await fetch(`/api/storage/${STORAGE_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value: JSON.stringify(state) }),
-    });
-  } catch (e) {
-    console.error("Save failed:", e);
-  }
+async function saveState(state, apiKey) {
+  if (!apiKey) return;
+  const res = await fetch(`/api/storage/${STORAGE_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    body: JSON.stringify({ value: JSON.stringify(state) }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
-function useAppState() {
+function useAppState(apiKey) {
   const [state, setState] = useState(DEFAULT_STATE);
   const [loaded, setLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("idle"); // "idle" | "saving" | "saved" | "error"
   const saveTimer = useRef(null);
+  const statusTimer = useRef(null);
   const stateRef = useRef(state);
   const loadedRef = useRef(false);
 
   useEffect(() => {
+    loadedRef.current = false;
+    setSaveStatus("idle");
+    if (!apiKey) {
+      setState(DEFAULT_STATE);
+      stateRef.current = DEFAULT_STATE;
+      loadedRef.current = true;
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
     let cancelled = false;
-    loadState().then((saved) => {
+    loadState(apiKey).then((saved) => {
       if (cancelled) return;
-      if (saved) {
-        const merged = { ...DEFAULT_STATE, ...saved };
-        setState(merged);
-        stateRef.current = merged;
-      }
+      const merged = saved ? { ...DEFAULT_STATE, ...saved } : DEFAULT_STATE;
+      setState(merged);
+      stateRef.current = merged;
       loadedRef.current = true;
       setLoaded(true);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [apiKey]);
 
   const update = useCallback((patch) => {
     setState((prev) => {
       const next = typeof patch === "function" ? patch(prev) : { ...prev, ...patch };
       stateRef.current = next;
-      if (!loadedRef.current) return next;
-      clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => saveState(next), 500);
       return next;
     });
-  }, []);
+    if (!loadedRef.current || !apiKey) return;
+    clearTimeout(saveTimer.current);
+    clearTimeout(statusTimer.current);
+    setSaveStatus("saving");
+    saveTimer.current = setTimeout(() => {
+      saveState(stateRef.current, apiKey)
+        .then(() => {
+          setSaveStatus("saved");
+          statusTimer.current = setTimeout(() => setSaveStatus("idle"), 2000);
+        })
+        .catch(() => {
+          setSaveStatus("error");
+          statusTimer.current = setTimeout(() => setSaveStatus("idle"), 3000);
+        });
+    }, 500);
+  }, [apiKey]);
 
-  // Save on unmount
+  // Save on unmount (auth mode only)
   useEffect(() => {
     return () => {
-      if (!loadedRef.current) return;
+      if (!loadedRef.current || !apiKey) return;
       clearTimeout(saveTimer.current);
-      saveState(stateRef.current);
+      clearTimeout(statusTimer.current);
+      saveState(stateRef.current, apiKey).catch(() => {});
     };
-  }, []);
+  }, [apiKey]);
 
-  return [state, update, loaded];
+  return [state, update, loaded, saveStatus];
 }
 
 /* ═══════════ CSS VARIABLES (injected once) ═══════════ */
@@ -514,6 +539,91 @@ function ConfirmDialog({ open, onConfirm, onCancel, title, message, danger }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ═══════════ AUTH ═══════════ */
+
+function useAuth() {
+  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(SESSION_KEY) || "");
+
+  async function login(key) {
+    const res = await fetch("/api/auth/verify", { headers: { "X-API-Key": key } });
+    if (!res.ok) throw new Error("Invalid API key");
+    sessionStorage.setItem(SESSION_KEY, key);
+    setApiKey(key);
+  }
+
+  function logout() {
+    sessionStorage.removeItem(SESSION_KEY);
+    setApiKey("");
+  }
+
+  return { apiKey, isAuth: !!apiKey, login, logout };
+}
+
+function AuthModal({ open, onClose, onLogin, isMobile }) {
+  const [key, setKey] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleLogin() {
+    if (!key.trim()) return;
+    setLoading(true);
+    setError("");
+    try {
+      await onLogin(key.trim());
+      setKey("");
+      onClose();
+    } catch {
+      setError("API key tidak valid.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter") handleLogin();
+  }
+
+  if (!open) return null;
+  return (
+    <Modal open={open} onClose={() => { setKey(""); setError(""); onClose(); }} title="🔑 Login API Key" isMobile={isMobile}>
+      <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.6 }}>
+        Mode Auth mengaktifkan penyimpanan data ke server. Data tersimpan saat tab ditutup.
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>API Key</label>
+        <input
+          type="password"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Masukkan API key..."
+          autoFocus
+          style={{
+            width: "100%",
+            padding: "11px 14px",
+            background: "var(--bg-input)",
+            border: `1px solid ${error ? "var(--danger)" : "var(--border)"}`,
+            borderRadius: 10,
+            color: "var(--text-primary)",
+            fontSize: 15,
+            outline: "none",
+            fontFamily: "var(--font-mono)",
+          }}
+          onFocus={(e) => (e.target.style.borderColor = error ? "var(--danger)" : "var(--accent)")}
+          onBlur={(e) => (e.target.style.borderColor = error ? "var(--danger)" : "var(--border)")}
+        />
+        {error && <div style={{ fontSize: 12, color: "var(--danger)", marginTop: 6 }}>{error}</div>}
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <Btn variant="secondary" onClick={() => { setKey(""); setError(""); onClose(); }}>Batal</Btn>
+        <Btn onClick={handleLogin} disabled={!key.trim() || loading}>
+          {loading ? "Verifikasi..." : "🔑 Login"}
+        </Btn>
+      </div>
+    </Modal>
   );
 }
 
@@ -1051,7 +1161,9 @@ const UsageAnalysis = memo(function UsageAnalysis({ logs, rate, onDelete }) {
 
 export default function ElectricityMonitor() {
   const isMobile = useIsMobile();
-  const [state, update, loaded] = useAppState();
+  const { apiKey, isAuth, login, logout } = useAuth();
+  const [state, update, loaded, saveStatus] = useAppState(apiKey);
+  const [authOpen, setAuthOpen] = useState(false);
 
   const { devices, usageLogs, tariff: selectedTariff, simDevices, pfEnabled, pfValue, voltage } = state;
   const activeVoltage = voltage || DEFAULT_VOLTAGE;
@@ -1145,9 +1257,14 @@ export default function ElectricityMonitor() {
       message: "Semua perangkat, aktivitas, dan pengaturan simulasi akan dihapus permanen.",
       danger: true,
       onConfirm: async () => {
-        try {
-          await fetch(`/api/storage/${STORAGE_KEY}`, { method: "DELETE" });
-        } catch {}
+        if (isAuth) {
+          try {
+            await fetch(`/api/storage/${STORAGE_KEY}`, {
+              method: "DELETE",
+              headers: { "X-API-Key": apiKey },
+            });
+          } catch {}
+        }
         update(() => ({ ...DEFAULT_STATE }));
         setConfirmState(null);
         setSettingsOpen(false);
@@ -1231,7 +1348,40 @@ export default function ElectricityMonitor() {
               <div style={{ fontSize: 10, color: "var(--text-dim)" }}>{TARIFF_RATES[selectedTariff]?.name}</div>
             </div>
           </div>
-          <Btn variant="ghost" onClick={() => setSettingsOpen(true)}>⚙️</Btn>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "3px 8px",
+              borderRadius: 99,
+              background: isAuth ? "#16A34A22" : "#F59E0B22",
+              color: isAuth ? "var(--accent)" : "var(--warning)",
+              border: `1px solid ${isAuth ? "#16A34A44" : "#F59E0B44"}`,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              whiteSpace: "nowrap",
+            }}>
+              {isAuth ? "Auth" : "Guest"}
+            </span>
+            {isAuth && saveStatus !== "idle" && (
+              <span style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: saveStatus === "saving" ? "var(--warning)" : saveStatus === "saved" ? "var(--accent)" : "var(--danger)",
+                whiteSpace: "nowrap",
+              }}>
+                {saveStatus === "saving" ? "↑ Menyimpan" : saveStatus === "saved" ? "✓ Tersimpan" : "✗ Gagal simpan"}
+              </span>
+            )}
+            <Btn
+              variant="ghost"
+              onClick={() => isAuth ? logout() : setAuthOpen(true)}
+              style={{ padding: "8px 10px", fontSize: 16 }}
+            >
+              {isAuth ? "🔓" : "🔑"}
+            </Btn>
+            <Btn variant="ghost" onClick={() => setSettingsOpen(true)}>⚙️</Btn>
+          </div>
         </div>
       </div>
 
@@ -1739,6 +1889,9 @@ export default function ElectricityMonitor() {
           <Btn variant="danger" onClick={clearAll} style={{ width: "100%" }}>🗑 Hapus Semua Data</Btn>
         </div>
       </Modal>
+
+      {/* Auth Modal */}
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onLogin={login} isMobile={isMobile} />
 
       {/* Confirm Dialog */}
       <ConfirmDialog
