@@ -1157,6 +1157,373 @@ const UsageAnalysis = memo(function UsageAnalysis({ logs, rate, onDelete }) {
   );
 });
 
+/* ═══════════ TUTORIAL TAB ═══════════ */
+
+const TutorialTab = memo(function TutorialTab({ isMobile, onNavigate }) {
+  const pad = isMobile ? 12 : 16;
+
+  const stepStyle = {
+    display: "flex",
+    gap: 12,
+    padding: "12px 14px",
+    background: "var(--bg-deep)",
+    borderRadius: 10,
+    border: "1px solid var(--border)",
+    alignItems: "flex-start",
+  };
+
+  const stepNumStyle = {
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    background: "var(--accent)",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 13,
+    fontWeight: 800,
+    flexShrink: 0,
+    marginTop: 1,
+  };
+
+  const featureRowStyle = {
+    display: "flex",
+    gap: 10,
+    padding: "9px 12px",
+    background: "var(--bg-deep)",
+    borderRadius: 8,
+    border: "1px solid var(--border)",
+    alignItems: "flex-start",
+  };
+
+  const sectionHeader = (color, text) => (
+    <div style={{ fontSize: 12, fontWeight: 700, color, marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>
+      {text}
+    </div>
+  );
+
+  const navBtn = (label, tabKey) => (
+    <button
+      onClick={() => onNavigate(tabKey)}
+      style={{
+        background: "var(--accent)",
+        color: "#fff",
+        border: "none",
+        padding: "7px 14px",
+        borderRadius: 8,
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: "pointer",
+        marginTop: 10,
+        transition: "opacity 0.15s",
+      }}
+      onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+      onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+    >
+      {label} →
+    </button>
+  );
+
+  return (
+    <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      {/* Intro */}
+      <Card style={{ borderColor: "#16A34A44" }}>
+        {sectionHeader("var(--accent)", "❓ Panduan Penggunaan PLN Monitor")}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.8 }}>
+          PLN Monitor membantu Anda mengestimasi tagihan listrik, menganalisis konsumsi per perangkat,
+          dan mensimulasikan beban MCB rumah. Ikuti panduan ini untuk memaksimalkan semua fitur.
+        </div>
+      </Card>
+
+      {/* Quick Start */}
+      <Card>
+        {sectionHeader("var(--info)", "🚀 Mulai Cepat (3 Langkah)")}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={stepStyle}>
+            <div style={stepNumStyle}>1</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 3 }}>
+                ⚙️ Atur Golongan Tarif PLN
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                Klik ikon <strong style={{ color: "#E2E8F0" }}>⚙️</strong> di kanan atas, pilih golongan tarif sesuai meteran rumah Anda
+                (tertera di tagihan PLN atau rekening listrik). Ini mempengaruhi semua kalkulasi biaya.
+              </div>
+            </div>
+          </div>
+          <div style={stepStyle}>
+            <div style={stepNumStyle}>2</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 3 }}>
+                🔌 Tambahkan Perangkat Listrik Anda
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                Buka tab <strong style={{ color: "#E2E8F0" }}>Perangkat</strong>, lalu klik <strong style={{ color: "var(--accent)" }}>+ Tambah</strong> untuk
+                memasukkan perangkat manual, atau <strong style={{ color: "var(--accent)" }}>📋 Preset</strong> untuk memilih dari 23+ perangkat umum rumah tangga.
+              </div>
+              {navBtn("Buka Tab Perangkat", "devices")}
+            </div>
+          </div>
+          <div style={stepStyle}>
+            <div style={stepNumStyle}>3</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)", marginBottom: 3 }}>
+                📊 Lihat Estimasi di Dashboard
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                Dashboard otomatis menampilkan estimasi biaya bulanan &amp; harian, breakdown per kategori,
+                dan top 5 perangkat paling boros. Data diperbarui setiap kali Anda menambah/mengubah perangkat.
+              </div>
+              {navBtn("Buka Dashboard", "dashboard")}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Dashboard */}
+      <Card>
+        {sectionHeader("var(--accent)", "📊 Dashboard")}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 12 }}>
+          Halaman utama yang merangkum semua konsumsi listrik Anda.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[
+            { icon: "💰", title: "Estimasi Bulanan & Harian", desc: "Kalkulasi otomatis dari semua perangkat yang Anda daftarkan × jam pemakaian × tarif per kWh." },
+            { icon: "⚡", title: "Tarif/kWh", desc: "Menampilkan tarif aktif sesuai golongan yang dipilih di Pengaturan." },
+            { icon: "📝", title: "Total Biaya Aktivitas", desc: "Akumulasi biaya dari semua log aktivitas yang Anda catat di tab Analisis." },
+            { icon: "📊", title: "Biaya per Kategori", desc: "Bar chart horizontal — segera terlihat kategori mana (AC, dapur, elektronik, dll) yang paling dominan." },
+            { icon: "🏆", title: "Top 5 Perangkat Boros", desc: "Ranking perangkat dengan estimasi biaya tertinggi per bulan." },
+            { icon: "💡", title: "Tips Hemat Listrik", desc: "6 tips praktis berbasis kebiasaan penggunaan alat rumah tangga." },
+          ].map((f, i) => (
+            <div key={i} style={featureRowStyle}>
+              <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{f.icon}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#E2E8F0", marginBottom: 2 }}>{f.title}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{f.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Devices */}
+      <Card>
+        {sectionHeader("var(--warning)", "🔌 Tab Perangkat")}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 12 }}>
+          Daftarkan semua perangkat listrik di rumah Anda beserta daya dan jam pemakaian harian.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+          {[
+            { icon: "➕", title: "Tambah Manual", desc: "Masukkan nama, daya (Watt — lihat label/stiker di perangkat), jam pakai per hari, jumlah unit, dan kategori." },
+            { icon: "📋", title: "Pilih dari Preset", desc: "23+ perangkat umum sudah tersedia dengan nilai default realistis. Pilih satu, lalu edit sesuai kondisi Anda." },
+            { icon: "✏️", title: "Edit Perangkat", desc: "Klik ikon pensil (✏️) pada perangkat untuk mengubah nama, daya, atau jam pemakaian." },
+            { icon: "🗑", title: "Hapus Perangkat", desc: "Klik ikon tempat sampah (🗑) untuk menghapus perangkat. Akan muncul konfirmasi sebelum dihapus." },
+          ].map((f, i) => (
+            <div key={i} style={featureRowStyle}>
+              <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{f.icon}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#E2E8F0", marginBottom: 2 }}>{f.title}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{f.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: "10px 12px", background: "#1E3A2F", borderRadius: 8, border: "1px solid #16A34A44" }}>
+          <div style={{ fontSize: 11, color: "#86EFAC", lineHeight: 1.7 }}>
+            💡 <strong>Tips:</strong> Cek label stiker di bagian belakang/bawah perangkat untuk nilai Watt yang akurat.
+            Jika tidak ada, cari spesifikasi model di internet. Nilai preset adalah estimasi umum — sesuaikan bila perlu.
+          </div>
+        </div>
+        {navBtn("Buka Tab Perangkat", "devices")}
+      </Card>
+
+      {/* Usage Analysis */}
+      <Card>
+        {sectionHeader("var(--gold)", "📝 Tab Analisis Penggunaan")}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 12 }}>
+          Catat biaya per aktivitas spesifik — cocok untuk kegiatan yang tidak rutin setiap hari
+          (rebus air, setrika baju, cas laptop, dll).
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+          {[
+            { icon: "🏷️", title: "Nama Aktivitas", desc: "Beri nama deskriptif, misalnya \"Rebus Air Minum\", \"Masak Nasi\", \"Setrika 10 baju\"." },
+            { icon: "⚡", title: "Daya (Watt)", desc: "Daya perangkat yang digunakan untuk aktivitas tersebut." },
+            { icon: "⏱️", title: "Durasi (Menit)", desc: "Berapa menit aktivitas berlangsung per satu kali kejadian." },
+            { icon: "🔢", title: "Berapa Kali", desc: "Frekuensi kejadian — contoh: rebus air 3 kali sehari." },
+            { icon: "📈", title: "Estimasi Langsung", desc: "Biaya otomatis dihitung dan ditampilkan sebelum Anda menyimpan log." },
+            { icon: "🗑", title: "Hapus Log", desc: "Setiap log aktivitas bisa dihapus satu per satu dari daftar." },
+          ].map((f, i) => (
+            <div key={i} style={featureRowStyle}>
+              <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{f.icon}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#E2E8F0", marginBottom: 2 }}>{f.title}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{f.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: "10px 12px", background: "#78350F22", borderRadius: 8, border: "1px solid #F59E0B33" }}>
+          <div style={{ fontSize: 11, color: "#FCD34D", lineHeight: 1.7 }}>
+            ⚠️ <strong>Rumus:</strong> Biaya = Watt × Menit ÷ 60.000 × Tarif/kWh × Jumlah Kali.
+            Berbeda dari tab Perangkat yang menghitung per bulan — Analisis menghitung per kejadian nyata.
+          </div>
+        </div>
+        {navBtn("Buka Tab Analisis", "usage")}
+      </Card>
+
+      {/* Simulation */}
+      <Card>
+        {sectionHeader("var(--info)", "🧪 Tab Simulasi Beban")}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 12 }}>
+          Simulasikan beban listrik secara real-time — apakah perangkat yang menyala bersamaan
+          melebihi batas MCB (Circuit Breaker) rumah Anda.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+          {[
+            { icon: "➕", title: "Tambah Perangkat Simulasi", desc: "Masukkan nama dan daya (Watt). Perangkat simulasi terpisah dari daftar di tab Perangkat." },
+            { icon: "🔘", title: "Toggle On/Off", desc: "Aktifkan/nonaktifkan perangkat simulasi satu per satu — gauge Ampere diperbarui secara instan." },
+            { icon: "📊", title: "Gauge Ampere", desc: "Bar yang menunjukkan total arus saat ini vs. batas MCB. Hijau = aman, kuning = mendekati batas, merah = over." },
+            { icon: "🔌", title: "Power Factor (PF)", desc: "Toggle untuk menampilkan gauge daya semu (VA). Berguna jika Anda punya banyak perangkat bermotor (AC, kulkas)." },
+            { icon: "💡", title: "Rekomendasi Otomatis", desc: "Kotak info di bawah gauge menampilkan status dan saran: aman, siaga, atau bahaya MCB trip." },
+          ].map((f, i) => (
+            <div key={i} style={featureRowStyle}>
+              <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{f.icon}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#E2E8F0", marginBottom: 2 }}>{f.title}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{f.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: "10px 12px", background: "#1e3a5f22", borderRadius: 8, border: "1px solid #06B6D444" }}>
+          <div style={{ fontSize: 11, color: "#67E8F9", lineHeight: 1.7 }}>
+            💡 <strong>Cara pakai:</strong> Tambahkan semua perangkat yang biasa menyala bersamaan (mis. AC + kulkas + TV + rice cooker),
+            lalu aktifkan semua. Jika gauge merah, kurangi beban atau jadwalkan pemakaian bergantian.
+          </div>
+        </div>
+        {navBtn("Buka Tab Simulasi", "simulation")}
+      </Card>
+
+      {/* Formulas */}
+      <Card>
+        {sectionHeader("var(--purple)", "📐 Tab Rumus")}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 12 }}>
+          Penjelasan lengkap semua rumus dan konsep listrik yang digunakan PLN Monitor —
+          cocok untuk yang ingin memahami cara kerja kalkulasi di balik layar.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+          {[
+            "⚡ Daya Listrik — P = V × I (Watt = Volt × Ampere)",
+            "🔋 Energi Listrik — kWh = Watt × Jam ÷ 1000",
+            "💰 Estimasi Biaya Bulanan — kWh × 30 hari × Tarif",
+            "🔌 MCB & Batas Arus — I = P ÷ V, kapasitas MCB",
+            "🌀 Power Factor — daya nyata vs daya semu",
+            "📝 Biaya per Aktivitas — W × Menit ÷ 60.000 × Tarif",
+          ].map((item, i) => (
+            <div key={i} style={{ fontSize: 12, color: "var(--text-secondary)", padding: "7px 10px", background: "var(--bg-deep)", borderRadius: 6, fontFamily: "var(--font-mono)" }}>
+              {item}
+            </div>
+          ))}
+        </div>
+        {navBtn("Buka Tab Rumus", "rumus")}
+      </Card>
+
+      {/* Auth vs Guest */}
+      <Card>
+        {sectionHeader("var(--warning)", "🔑 Mode Auth vs Guest")}
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10, marginBottom: 14 }}>
+          <div style={{ padding: "12px 14px", background: "var(--bg-deep)", borderRadius: 10, border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--warning)", marginBottom: 8 }}>👤 Guest (Default)</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {["✅ Semua fitur kalkulasi tersedia", "✅ Export / Import JSON", "❌ Data hilang saat tab ditutup", "❌ Tidak ada sinkronisasi"].map((item, i) => (
+                <div key={i} style={{ fontSize: 11, color: "var(--text-secondary)" }}>{item}</div>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding: "12px 14px", background: "#1E3A2F", borderRadius: 10, border: "1px solid #16A34A44" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", marginBottom: 8 }}>🔐 Auth (API Key)</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {["✅ Semua fitur kalkulasi tersedia", "✅ Export / Import JSON", "✅ Data tersimpan ke server", "✅ Akses dari berbagai perangkat"].map((item, i) => (
+                <div key={i} style={{ fontSize: 11, color: "#86EFAC" }}>{item}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[
+            { step: "1", text: "Dapatkan API key dari administrator server (atau set di file .env saat deploy sendiri)." },
+            { step: "2", text: "Klik ikon 🔑 di kanan atas header." },
+            { step: "3", text: "Masukkan API key lalu klik Masuk. Badge di header berubah dari \"Guest\" ke \"Auth\"." },
+            { step: "4", text: "Data otomatis tersimpan ke server setiap perubahan (dengan indikator ↑ Menyimpan / ✓ Tersimpan)." },
+          ].map((s) => (
+            <div key={s.step} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <div style={{ ...stepNumStyle, background: "var(--warning)", width: 22, height: 22, fontSize: 11 }}>{s.step}</div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, paddingTop: 2 }}>{s.text}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 12, padding: "10px 12px", background: "#78350F22", borderRadius: 8, border: "1px solid #F59E0B33" }}>
+          <div style={{ fontSize: 11, color: "#FCD34D", lineHeight: 1.7 }}>
+            ⚠️ API key disimpan di <strong>sessionStorage</strong> — otomatis logout saat tab browser ditutup untuk keamanan.
+            Klik 🔓 untuk logout manual kapan saja.
+          </div>
+        </div>
+      </Card>
+
+      {/* Settings */}
+      <Card>
+        {sectionHeader("var(--text-secondary)", "⚙️ Pengaturan")}
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 12 }}>
+          Klik ikon ⚙️ di kanan atas untuk membuka Pengaturan.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[
+            { icon: "🏷️", title: "Golongan Tarif PLN", desc: "Pilih sesuai kode daya di tagihan PLN Anda (R-1/1300VA, R-2/3500VA, dll). Tarif per kWh dan batas MCB diperbarui otomatis." },
+            { icon: "🔌", title: "Tegangan Listrik", desc: "Default 220V (standar Indonesia). Ubah ke 110V/230V/240V jika Anda tinggal di luar negeri atau menggunakan perangkat impor." },
+            { icon: "📤", title: "Export Backup", desc: "Unduh semua data (perangkat, log aktivitas, pengaturan) sebagai file JSON. Simpan sebagai cadangan." },
+            { icon: "📥", title: "Import Backup", desc: "Pulihkan data dari file JSON yang sebelumnya di-export. Data lama akan ditimpa." },
+            { icon: "🗑", title: "Hapus Semua Data", desc: "Menghapus semua perangkat, log aktivitas, dan simulasi. Tindakan ini tidak dapat diurungkan — akan muncul konfirmasi." },
+          ].map((f, i) => (
+            <div key={i} style={featureRowStyle}>
+              <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{f.icon}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#E2E8F0", marginBottom: 2 }}>{f.title}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{f.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Accuracy Tips */}
+      <Card style={{ borderColor: "#16A34A44" }}>
+        {sectionHeader("var(--accent)", "✅ Tips untuk Hasil Akurat")}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[
+            { icon: "🔍", title: "Cek label stiker perangkat", desc: "Nilai Watt tertera di label di bagian belakang/bawah perangkat. Lebih akurat daripada spesifikasi umum dari internet." },
+            { icon: "⏰", title: "Estimasi jam pakai realistis", desc: "AC 8 jam/hari hanya jika memang dinyalakan 8 jam. Overestimasi jam pakai = overestimasi biaya." },
+            { icon: "🔢", title: "Isi jumlah unit yang tepat", desc: "Punya 3 lampu LED? Masukkan qty 3, bukan tambahkan 3 entri terpisah." },
+            { icon: "📋", title: "Gunakan preset sebagai titik awal", desc: "Preset sudah dikonfigurasi dengan nilai umum. Edit watt dan jam pakai sesuai kondisi perangkat Anda." },
+            { icon: "📝", title: "Pisahkan antara 'rutin' dan 'aktivitas'", desc: "Perangkat yang menyala setiap hari → Tab Perangkat. Kegiatan tidak rutin (masak, setrika) → Tab Analisis." },
+            { icon: "💾", title: "Backup data secara berkala", desc: "Jika pakai Guest mode, export backup JSON setelah setiap sesi agar data tidak hilang." },
+          ].map((f, i) => (
+            <div key={i} style={featureRowStyle}>
+              <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{f.icon}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#E2E8F0", marginBottom: 2 }}>{f.title}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{f.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+    </div>
+  );
+});
+
 /* ═══════════ MAIN APP ═══════════ */
 
 export default function ElectricityMonitor() {
@@ -1394,6 +1761,7 @@ export default function ElectricityMonitor() {
             { key: "usage", label: "📝 Analisis", badge: usageLogs.length },
             { key: "simulation", label: "🧪 Simulasi" },
             { key: "rumus", label: "📐 Rumus" },
+            { key: "tutorial", label: "❓ Tutorial" },
           ].map((t) => (
             <TabButton key={t.key} active={tab === t.key} onClick={() => setTab(t.key)} badge={t.badge} isMobile={isMobile}>
               {t.label}
@@ -1715,6 +2083,11 @@ export default function ElectricityMonitor() {
             isMobile={isMobile}
             voltage={activeVoltage}
           />
+        )}
+
+        {/* TUTORIAL */}
+        {tab === "tutorial" && (
+          <TutorialTab isMobile={isMobile} onNavigate={setTab} />
         )}
       </div>
 

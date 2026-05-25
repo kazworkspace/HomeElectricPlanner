@@ -1,4 +1,4 @@
-# ⚡ PLN Monitor v2.1
+# ⚡ PLN Monitor v2.2
 
 Monitor konsumsi listrik rumah tangga Indonesia — estimasi biaya PLN, simulasi beban MCB, dan tips hemat listrik.
 
@@ -11,6 +11,7 @@ Monitor konsumsi listrik rumah tangga Indonesia — estimasi biaya PLN, simulasi
 - **Tips Hemat** — Saran praktis untuk menghemat listrik
 - **Export/Import** — Backup dan restore data dalam format JSON
 - **Auth / Guest Mode** — API key login untuk menyimpan data; Guest mode tanpa simpan
+- **Tutorial** — Panduan penggunaan lengkap untuk pengguna baru, dengan navigasi langsung ke setiap fitur
 - **Responsive** — Optimized untuk desktop dan mobile
 - **Secure** — Rate limiting, brute-force protection, security headers, CSP, HTTPS
 
@@ -195,6 +196,9 @@ All storage endpoints require header: `X-API-Key: <your-key>`
 - **sessionStorage** — API key never stored in localStorage, clears on tab close
 
 ## Changelog
+
+### v2.2
+- **Tutorial Tab** — Panduan penggunaan interaktif lengkap: Quick Start 3-langkah, penjelasan per tab, Auth vs Guest, tips akurasi, tombol navigasi langsung ke setiap fitur
 
 ### v2.1
 - **Auth / Guest Mode** — API key login, guest mode without persistence
