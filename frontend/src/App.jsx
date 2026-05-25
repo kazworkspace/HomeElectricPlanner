@@ -1537,6 +1537,8 @@ export default function ElectricityMonitor() {
   const rate = TARIFF_RATES[selectedTariff]?.rate || 1444.70;
 
   const [tab, setTab] = useState("dashboard");
+  const [showTabHint, setShowTabHint] = useState(true);
+  const tabScrollRef = useRef(null);
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
   const [editDevice, setEditDevice] = useState(null);
   const [addUsageOpen, setAddUsageOpen] = useState(false);
@@ -1754,19 +1756,38 @@ export default function ElectricityMonitor() {
 
       {/* Tabs */}
       <div style={{ borderBottom: "1px solid var(--bg-card)", background: "var(--bg-deep)", position: "sticky", top: isMobile ? 57 : 63, zIndex: 99 }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", display: "flex", overflowX: "auto", padding: `0 ${isMobile ? 4 : 16}px`, scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
-          {[
-            { key: "dashboard", label: "📊 Dashboard" },
-            { key: "devices", label: "🔌 Perangkat", badge: devices.length },
-            { key: "usage", label: "📝 Analisis", badge: usageLogs.length },
-            { key: "simulation", label: "🧪 Simulasi" },
-            { key: "rumus", label: "📐 Rumus" },
-            { key: "tutorial", label: "❓ Tutorial" },
-          ].map((t) => (
-            <TabButton key={t.key} active={tab === t.key} onClick={() => setTab(t.key)} badge={t.badge} isMobile={isMobile}>
-              {t.label}
-            </TabButton>
-          ))}
+        <div style={{ position: "relative", maxWidth: 900, margin: "0 auto" }}>
+          <div
+            ref={tabScrollRef}
+            onScroll={() => {
+              const el = tabScrollRef.current;
+              if (el) setShowTabHint(el.scrollLeft < 16);
+            }}
+            style={{ display: "flex", overflowX: "auto", padding: `0 ${isMobile ? 4 : 16}px`, scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}
+          >
+            {[
+              { key: "dashboard", label: "📊 Dashboard" },
+              { key: "devices", label: "🔌 Perangkat", badge: devices.length },
+              { key: "usage", label: "📝 Analisis", badge: usageLogs.length },
+              { key: "simulation", label: "🧪 Simulasi" },
+              { key: "rumus", label: "📐 Rumus" },
+              { key: "tutorial", label: "❓ Tutorial" },
+            ].map((t) => (
+              <TabButton key={t.key} active={tab === t.key} onClick={() => setTab(t.key)} badge={t.badge} isMobile={isMobile}>
+                {t.label}
+              </TabButton>
+            ))}
+          </div>
+          {isMobile && showTabHint && (
+            <div style={{
+              position: "absolute", right: 0, top: 0, bottom: 0, width: 48,
+              background: "linear-gradient(to right, transparent, var(--bg-deep))",
+              pointerEvents: "none", display: "flex", alignItems: "center",
+              justifyContent: "flex-end", paddingRight: 6,
+            }}>
+              <span style={{ fontSize: 14, color: "var(--text-muted)", fontWeight: 700, lineHeight: 1 }}>›</span>
+            </div>
+          )}
         </div>
       </div>
 
